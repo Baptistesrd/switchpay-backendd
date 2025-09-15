@@ -1,0 +1,69 @@
+@base = http://127.0.0.1:8000
+@api_key = cle-api-entreprise1
+@idempotency = 11111111-aaaa-bbbb-cccc-111111111111
+@json = application/json
+
+### ✅ Health
+GET {{base}}/health
+
+### 🔢 Version
+GET {{base}}/version
+
+### 📊 Metrics
+GET {{base}}/metrics
+
+### 🔐 (Stripe FR/EUR) — Create transaction
+POST {{base}}/transaction
+x-api-key: {{api_key}}
+Idempotency-Key: {{idempotency}}
+Content-Type: {{json}}
+
+{
+  "montant": 100.0,
+  "devise": "EUR",
+  "pays": "FR",
+  "device": "web"
+}
+
+### 🔁 Rejouer EXACTEMENT la même requête avec la même clé → même réponse (idempotency hit)
+POST {{base}}/transaction
+x-api-key: {{api_key}}
+Idempotency-Key: {{idempotency}}
+Content-Type: {{json}}
+
+{
+  "montant": 100.0,
+  "devise": "EUR",
+  "pays": "FR",
+  "device": "web"
+}
+
+### ⚠️ Même clé MAIS payload différent → 409 attendu
+POST {{base}}/transaction
+x-api-key: {{api_key}}
+Idempotency-Key: {{idempotency}}
+Content-Type: {{json}}
+
+{
+  "montant": 101.0,
+  "devise": "EUR",
+  "pays": "FR",
+  "device": "web"
+}
+
+### 📄 Lister transactions (pagination par défaut)
+GET {{base}}/transactions
+
+### 📄 Lister transactions (pagination contrôlée)
+GET {{base}}/transactions?limit=10&offset=0
+
+### ❌ Sans API Key → 403 attendu
+POST {{base}}/transaction
+Content-Type: {{json}}
+
+{
+  "montant": 10,
+  "devise": "EUR",
+  "pays": "FR",
+  "device": "web"
+}
