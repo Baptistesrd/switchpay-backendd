@@ -7,28 +7,15 @@ from backend.db.db_utils import (
     get_transaction_by_id,
     conn,
     cursor,
-    get_idempotency_record,
-    create_idempotency_placeholder,
-    complete_idempotency_record,
 )
 from backend.services.payment_processor import call_psp
 from backend.security.auth import verify_api_key
 from datetime import datetime
 import uuid
 import time
-import json
-import hashlib
 from typing import Optional, List, Dict, Any
 
 router = APIRouter()
-
-
-def fingerprint_request(data: TransactionRequest) -> str:
-    """
-    Empreinte stable de la charge utile pour vérifier la cohérence d'une même clé.
-    """
-    payload = json.dumps(data.dict(), sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 @router.post("/transaction", response_model=TransactionResponse)
@@ -37,36 +24,6 @@ async def create_transaction(
     entreprise: str = Depends(verify_api_key),
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
 ):
-    # ===== Idempotency: lecture/placeholder =====
-    req_fp = fingerprint_request(data)
-
-    if idempotency_key:
-        existing = get_idempotency_record(idempotency_key)
-        if existing:
-            # déjà finalisée -> renvoyer exactement la même réponse
-            if existing.get("state") == "completed":
-                if existing.get("request_fingerprint") != req_fp:
-                    # même clé avec payload différent → on refuse
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Idempotency-Key already used with a different payload.",
-                    )
-                return existing["response_body"]
-
-            # en cours
-            raise HTTPException(
-                status_code=409,
-                detail="A request with this Idempotency-Key is already in progress. Retry later.",
-            )
-        else:
-            create_idempotency_placeholder(
-                key=idempotency_key,
-                entreprise=entreprise,
-                endpoint="/transaction",
-                method="POST",
-                request_fingerprint=req_fp,
-            )
-
     # ===== Traitement normal =====
     tx_id = str(uuid.uuid4())
     psp = smart_router(data.dict())
@@ -97,22 +54,7 @@ async def create_transaction(
     print(f"[METRICS] tx_id={tx_id} psp={psp} latency_ms={latency_ms}")
     save_transaction(transaction_data)
 
-    response_payload = {**transaction_data}
-
-    # ===== Idempotency: enregistre la réponse finale =====
-    if idempotency_key:
-        try:
-            complete_idempotency_record(
-                key=idempotency_key,
-                response_body=response_payload,
-                status_code=200,
-                tx_id=tx_id,
-            )
-        except Exception as e:
-            # on ne bloque pas la réponse
-            print(f"[WARN] Failed to complete idempotency record: {e}")
-
-    return response_payload
+    return transaction_data
 
 
 @router.get("/transaction/{tx_id}")
