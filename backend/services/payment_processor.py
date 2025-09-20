@@ -1,31 +1,68 @@
-import os, random, time
-from typing import Dict, Any
-from backend.services.psp_stripe import create_and_confirm_intent
+# backend/services/payment_processor.py
+import os
+import random
+import time
+import traceback
+from typing import Dict, Any, List
 
-def call_psp(psp_name: str, data: Dict[str, Any]) -> dict:
-    amount = data["montant"]
-    currency = data["devise"]
+# import tes modules simulés existants
+from backend.psps import stripe as psp_stripe
+from backend.psps import rapyd as psp_rapyd
+from backend.psps import wise as psp_wise
+from backend.psps import ayden as psp_adyen
 
-    # 1) Stripe réel si clé présente
-    if psp_name == "stripe" and os.getenv("STRIPE_SECRET_KEY"):
-        try:
-            return create_and_confirm_intent(amount, currency)
-        except Exception as e:
-            print(f"[STRIPE][ERROR] {e}")
-            return {"status": "failed", "psp_tx_id": None}
+# mapping name -> module
+PSP_MODULES = {
+    "stripe": psp_stripe,
+    "rapyd": psp_rapyd,
+    "wise": psp_wise,
+    "adyen": psp_adyen,
+}
 
-    # 2) Sinon: simulation pour les autres PSP (inchangé)
-    latency_sim = {
-        "adyen": (150, 300),
-        "wise": (200, 350),
-        "rapyd": (300, 500),
-        "dlocal": (350, 600),
-        "stripe": (120, 250),  # fallback si pas de clé Stripe
-    }
-    status = "success" if random.random() > 0.05 else "failed"
-    psp_tx_id = f"{psp_name}_{random.randint(100000, 999999)}"
-    lo, hi = latency_sim.get(psp_name, (100, 300))
-    time.sleep(random.uniform(lo/1000, hi/1000))
-    return {"status": status, "psp_tx_id": psp_tx_id}
+# Définit l'ordre de fallback (exemple)
+DEFAULT_FALLBACK_ORDER = ["stripe", "adyen", "rapyd", "wise"]
 
+def call_single_psp(psp_name: str, data: Dict[str, Any]) -> dict:
+    """
+    Appelle le PSP simulé. Ici tu pourras remplacer par des vrais SDK calls.
+    """
+    mod = PSP_MODULES.get(psp_name)
+    if not mod:
+        return {"status": "failed", "error": f"PSP {psp_name} not found"}
+    try:
+        # chaque module expose process_payment
+        return mod.process_payment(data)
+    except Exception as e:
+        # capture l'exception et renvoie un failed
+        return {"status": "failed", "error": str(e), "trace": traceback.format_exc()}
 
+def call_psp(psp_name: str, data: Dict[str, Any], fallback: List[str] | None = None) -> dict:
+    """
+    Tentative sur psp_name, puis fallback list si échec.
+    Retry simple (exponential backoff) sur erreurs transitoires (simulé).
+    """
+    tried = []
+    fallback = fallback or DEFAULT_FALLBACK_ORDER
+    # build ordered list starting with desired psp
+    order = [psp_name] + [p for p in fallback if p != psp_name]
+    last_err = None
+
+    for candidate in order:
+        tried.append(candidate)
+        # naive retry loop
+        attempt = 0
+        max_attempts = 2
+        while attempt < max_attempts:
+            attempt += 1
+            resp = call_single_psp(candidate, data)
+            if resp.get("status") == "success":
+                resp["psp_used"] = candidate
+                resp["attempts"] = attempt
+                return resp
+            # si échec, backoff et retry
+            last_err = resp.get("error", "unknown")
+            sleep = (0.1 * (2 ** (attempt - 1))) + random.uniform(0, 0.05)
+            time.sleep(sleep)
+        # si on arrive là, on passe au PSP suivant
+    # aucun PSP n'a réussi
+    return {"status": "failed", "error": last_err or "all psps failed", "tried": tried}
