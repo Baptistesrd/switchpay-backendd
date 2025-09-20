@@ -1,19 +1,16 @@
-# backend/db/db_utils.py
+# backend/db/db_utils.py 
 import sqlite3
 import json
 from datetime import datetime
 from typing import Optional
 
-# Connexion (dev local). En prod tu liras DATABASE_URL et utiliseras psycopg2/sqlalchemy.
 conn = sqlite3.connect("transactions.db", check_same_thread=False)
 cursor = conn.cursor()
 
-# Pragmas utiles
 cursor.execute("PRAGMA journal_mode=WAL;")
 cursor.execute("PRAGMA synchronous=NORMAL;")
 cursor.execute("PRAGMA foreign_keys=ON;")
 
-# ===== Transactions table =====
 cursor.execute('''
 CREATE TABLE IF NOT EXISTS transactions (
     id TEXT PRIMARY KEY,
@@ -31,7 +28,6 @@ CREATE TABLE IF NOT EXISTS transactions (
 )
 ''')
 
-# ===== Idempotency table =====
 cursor.execute('''
 CREATE TABLE IF NOT EXISTS idempotency (
     key TEXT PRIMARY KEY,
@@ -42,7 +38,6 @@ CREATE TABLE IF NOT EXISTS idempotency (
 )
 ''')
 
-# Indexes
 cursor.execute("CREATE INDEX IF NOT EXISTS idx_tx_created_at ON transactions(created_at)")
 cursor.execute("CREATE INDEX IF NOT EXISTS idx_tx_psp ON transactions(psp)")
 cursor.execute("CREATE INDEX IF NOT EXISTS idx_tx_status ON transactions(status)")
@@ -50,7 +45,6 @@ cursor.execute("CREATE INDEX IF NOT EXISTS idx_idemp_created_at ON idempotency(c
 
 conn.commit()
 
-# ---- Transactions helpers ----
 def save_transaction(tx: dict):
     cursor.execute('''
         INSERT OR REPLACE INTO transactions (
@@ -84,7 +78,6 @@ def get_all_transactions() -> list[dict]:
     rows = cursor.fetchall()
     return [dict(zip([c[0] for c in cursor.description], row)) for row in rows]
 
-# ---- Idempotency helpers ----
 def save_idempotency(key: str, request_hash: str, tx_id: str, response_snapshot: dict):
     cursor.execute('''
         INSERT OR REPLACE INTO idempotency (key, request_hash, tx_id, response_snapshot, created_at)
