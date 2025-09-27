@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.routers.transaction import router as transaction_router
 from backend.routers.metrics import router as metrics_router
+from backend.routers.contact import router as contact_router
 
 # === ENV CONFIG ===
 DEBUG = os.getenv("DEBUG", "true").lower() in ("1", "true", "yes")
@@ -67,6 +68,7 @@ async def log_requests(request: Request, call_next):
 # === ROUTES ===
 app.include_router(transaction_router)
 app.include_router(metrics_router)
+app.include_router(contact_router) 
 
 # === STARTUP / SHUTDOWN ===
 @app.on_event("startup")
