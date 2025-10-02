@@ -67,3 +67,23 @@ Content-Type: {{json}}
   "pays": "FR",
   "device": "web"
 }
+
+### 💬 Assistant AI
+POST {{base}}/assistant
+Content-Type: application/json
+
+{
+  "message": "Comment SwitchPay se compare à Stripe ?"
+}
+
+### 📩 Envoyer un message de contact
+POST {{base}}/contact
+Content-Type: application/json
+
+{
+  "email": "test@example.com",
+  "message": "Hello, this is a test message."
+}
+
+### 📩 Lister les messages de contact
+GET {{base}}/contact

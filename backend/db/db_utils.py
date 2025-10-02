@@ -98,3 +98,30 @@ def get_idempotency(key: str) -> Optional[dict]:
             "created_at": created_at
         }
     return None
+
+# === CONTACT MESSAGES ===
+
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS contact_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL,
+    message TEXT NOT NULL,
+    created_at TEXT NOT NULL
+)
+''')
+
+conn.commit()
+
+
+def save_contact_message(email: str, message: str):
+    cursor.execute(
+        "INSERT INTO contact_messages (email, message, created_at) VALUES (?, ?, ?)",
+        (email, message, datetime.utcnow().isoformat())
+    )
+    conn.commit()
+
+
+def get_all_contact_messages() -> list[dict]:
+    cursor.execute("SELECT * FROM contact_messages ORDER BY datetime(created_at) DESC")
+    rows = cursor.fetchall()
+    return [dict(zip([c[0] for c in cursor.description], row)) for row in rows]
