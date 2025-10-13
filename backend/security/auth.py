@@ -1,3 +1,5 @@
+# backend/security/auth.py
+
 import os
 from fastapi import Header, HTTPException
 from dotenv import load_dotenv
@@ -18,4 +20,3 @@ def verify_api_key(x_api_key: str = Header(...)) -> str:
     if x_api_key not in API_KEYS:
         raise HTTPException(status_code=403, detail="Invalid API Key")
     return API_KEYS[x_api_key]
-

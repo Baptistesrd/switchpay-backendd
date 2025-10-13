@@ -10,6 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.routers.transaction import router as transaction_router
 from backend.routers.metrics import router as metrics_router
 from backend.routers.contact import router as contact_router
+from backend.routers.temp_key_router import router as temp_key_router
+
 
 # === ENV CONFIG ===
 DEBUG = os.getenv("DEBUG", "true").lower() in ("1", "true", "yes")
@@ -89,3 +91,5 @@ def health():
 @app.get("/version")
 def version():
     return {"name": "SwitchPay API", "version": "2.0.0", "debug": DEBUG}
+
+app.include_router(temp_key_router)
