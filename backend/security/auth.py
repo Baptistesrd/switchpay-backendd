@@ -1,22 +1,13 @@
 # backend/security/auth.py
 
-import os
 from fastapi import Header, HTTPException
-from dotenv import load_dotenv
 
-load_dotenv()
+def verify_api_key(x_api_key: str = Header(None)):
+    if not x_api_key:
+        raise HTTPException(status_code=403, detail="API key missing")
 
-API_KEYS = {}
-env_keys = os.getenv("API_KEYS")
+    # ✅ sandbox
+    if x_api_key.startswith("test_"):
+        return {"org": "sandbox"}
 
-if env_keys:
-    for pair in env_keys.split(","):
-        key, entreprise = pair.split(":")
-        API_KEYS[key.strip()] = entreprise.strip()
-
-print(f"[DEBUG] API_KEYS chargées depuis .env : {API_KEYS}")
-
-def verify_api_key(x_api_key: str = Header(...)) -> str:
-    if x_api_key not in API_KEYS:
-        raise HTTPException(status_code=403, detail="Invalid API Key")
-    return API_KEYS[x_api_key]
+    raise HTTPException(status_code=403, detail="Invalid API key")

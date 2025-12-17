@@ -32,7 +32,11 @@ if not DEBUG:
 
 # === CORS POLICY ===
 dev_origins = ["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000", "http://127.0.0.1:3001"]
-prod_origins = ["https://switchpay-frontendd.onrender.com"]
+prod_origins = [
+    "https://switchpay-frontendd.onrender.com",
+    "https://switchpayglobal.com"  # 👈 AJOUTE CELUI-CI
+]
+
 
 if DEBUG:
     ALLOW_ORIGINS = list(dict.fromkeys(dev_origins + CORS_ORIGINS + prod_origins))

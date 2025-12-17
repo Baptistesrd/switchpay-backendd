@@ -3,10 +3,9 @@ from backend.schemas.transaction import TransactionRequest, TransactionResponse
 from backend.services import payment_processor
 from backend.db.db_utils import (
     save_transaction,
-    get_transaction_by_id,
     save_idempotency,
     get_idempotency,
-    get_all_transactions,  # ✅ nouveau import
+    get_all_transactions,
 )
 from backend.security.auth import verify_api_key
 from datetime import datetime
@@ -18,14 +17,16 @@ from typing import Optional, Dict, Any, List
 
 router = APIRouter()
 
+
 def compute_request_hash(payload: dict) -> str:
     s = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
+
 @router.post("/transaction", response_model=TransactionResponse)
 async def create_transaction(
     data: TransactionRequest,
-    entreprise: str = Depends(verify_api_key),
+    api=Depends(verify_api_key),
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
 ):
     payload = data.dict()
@@ -36,19 +37,22 @@ async def create_transaction(
         if record:
             if record["request_hash"] == req_hash and record["response_snapshot"]:
                 return record["response_snapshot"]
-            raise HTTPException(status_code=409, detail="Idempotency conflict: different payload for same key")
+            raise HTTPException(
+                status_code=409,
+                detail="Idempotency conflict: different payload for same key",
+            )
 
     tx_id = str(uuid.uuid4())
-    chosen_psp = "stripe"
+
     try:
         from backend.services.smart_router import smart_router
         chosen_psp = smart_router(payload)
     except Exception:
-        pass
+        chosen_psp = "stripe"
 
     transaction_data: Dict[str, Any] = {
         "id": tx_id,
-        "entreprise": entreprise,
+        "entreprise": api.get("org", "sandbox"),
         "montant": data.montant,
         "devise": data.devise,
         "pays": data.pays,
@@ -66,7 +70,7 @@ async def create_transaction(
     latency_ms = round((time.perf_counter() - start) * 1000, 1)
 
     transaction_data["status"] = result.get("status", "failed")
-    transaction_data["psp_tx_id"] = result.get("psp_tx_id") or result.get("psp_id") or None
+    transaction_data["psp_tx_id"] = result.get("psp_tx_id") or result.get("psp_id")
     transaction_data["latency_ms"] = latency_ms
     transaction_data["raw_response"] = result
 
@@ -78,11 +82,7 @@ async def create_transaction(
 
     return transaction_data
 
-# ✅ Nouveau endpoint
+
 @router.get("/transactions", response_model=List[TransactionResponse])
-async def list_transactions(entreprise: str = Depends(verify_api_key)):
-    """
-    Liste toutes les transactions visibles pour l'entreprise appelante.
-    """
-    all_tx = get_all_transactions()
-    return [tx for tx in all_tx if tx.get("entreprise") == entreprise]
+async def list_transactions(api=Depends(verify_api_key)):
+    return get_all_transactions()
