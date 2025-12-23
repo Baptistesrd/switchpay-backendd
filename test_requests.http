@@ -1,4 +1,4 @@
-@base = http://127.0.0.1:8000
+@base = https://switchpay-backend.onrender.com
 @api_key = cle-api-entreprise1
 @idempotency = 11111111-aaaa-bbbb-cccc-111111111111
 @json = application/json
@@ -73,7 +73,7 @@ POST {{base}}/assistant
 Content-Type: application/json
 
 {
-  "message": "Comment SwitchPay se compare à Stripe ?"
+  "message": "Comment switchpay se compare à Stripe ?"
 }
 
 ### 📩 Envoyer un message de contact
@@ -87,3 +87,16 @@ Content-Type: application/json
 
 ### 📩 Lister les messages de contact
 GET {{base}}/contact
+
+### 📝 Join waitlist
+POST {{base}}/waitlist
+Content-Type: application/json
+
+{
+  "email": "founder@test.com",
+  "company": "SwitchPay",
+  "role": "Founder"
+}
+
+### 📋 List waitlist (admin)
+GET {{base}}/waitlist

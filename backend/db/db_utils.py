@@ -125,3 +125,37 @@ def get_all_contact_messages() -> list[dict]:
     cursor.execute("SELECT * FROM contact_messages ORDER BY datetime(created_at) DESC")
     rows = cursor.fetchall()
     return [dict(zip([c[0] for c in cursor.description], row)) for row in rows]
+
+
+# === WAITLIST ===
+
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS waitlist (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL UNIQUE,
+    company TEXT,
+    role TEXT,
+    created_at TEXT NOT NULL
+)
+''')
+
+conn.commit()
+
+
+def save_waitlist(email: str, company: str | None, role: str | None):
+    cursor.execute(
+        '''
+        INSERT OR IGNORE INTO waitlist (email, company, role, created_at)
+        VALUES (?, ?, ?, ?)
+        ''',
+        (email, company, role, datetime.utcnow().isoformat())
+    )
+    conn.commit()
+
+
+def get_waitlist() -> list[dict]:
+    cursor.execute(
+        "SELECT * FROM waitlist ORDER BY datetime(created_at) DESC"
+    )
+    rows = cursor.fetchall()
+    return [dict(zip([c[0] for c in cursor.description], row)) for row in rows]
