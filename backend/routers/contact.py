@@ -1,31 +1,60 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, EmailStr
+
 from backend.db.db_utils import save_contact_message, get_all_contact_messages
 from backend.services.mailer import send_email
-import asyncio
 
 router = APIRouter()
+
+
+# ============================================================
+# SCHEMA
+# ============================================================
 
 class ContactRequest(BaseModel):
     email: EmailStr
     message: str
 
+
+# ============================================================
+# ROUTES
+# ============================================================
+
 @router.post("/contact")
 async def create_contact(data: ContactRequest):
-    print("🚀 Contact endpoint appelé (nouvelle version)")
+    """
+    Save contact message and send notification email.
+    Email sending is awaited to ensure reliability on Render.
+    """
     try:
-        # Sauvegarde en DB
+        # 1️⃣ Save in database
         save_contact_message(data.email, data.message)
 
-        # Envoi email (async)
-        subject = "📩 Nouvelle inscription/contact SwitchPay"
-        body = f"Email: {data.email}\nMessage: {data.message}"
-        asyncio.create_task(send_email(subject, body))
+        # 2️⃣ Prepare email
+        subject = "📩 Nouveau message SwitchPay"
+        body = (
+            f"Email: {data.email}\n\n"
+            f"Message:\n{data.message}"
+        )
 
-        return {"status": "ok", "msg": "Message saved & email sent"}
+        # 3️⃣ Send email (blocking but reliable)
+        await send_email(subject, body)
+
+        return {
+            "status": "ok",
+            "msg": "Message received & email sent"
+        }
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=f"Contact failed: {str(e)}"
+        )
+
 
 @router.get("/contact")
 def list_contacts():
+    """
+    Admin/debug endpoint to list stored contact messages.
+    """
     return get_all_contact_messages()
