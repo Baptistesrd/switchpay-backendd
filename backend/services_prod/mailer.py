@@ -1,4 +1,3 @@
-# backend/services/mailer.py
 import os
 import smtplib
 from email.mime.text import MIMEText
@@ -24,7 +23,7 @@ def send_email(subject: str, body: str):
             server.login(EMAIL_USER, EMAIL_PASS)
             server.sendmail(EMAIL_USER, EMAIL_TO, msg.as_string())
 
-        print(f"✅ Email envoyé à {EMAIL_TO}")
+        print(f"✅ Email sent to {EMAIL_TO}")
 
     except Exception as e:
-        print("❌ Erreur envoi email:", e)
+        print("❌ Error mail:", e)

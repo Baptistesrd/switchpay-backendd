@@ -1,4 +1,3 @@
-# backend/db/db_utils.py 
 import sqlite3
 import json
 from datetime import datetime
@@ -99,8 +98,6 @@ def get_idempotency(key: str) -> Optional[dict]:
         }
     return None
 
-# === CONTACT MESSAGES ===
-
 cursor.execute('''
 CREATE TABLE IF NOT EXISTS contact_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -126,8 +123,6 @@ def get_all_contact_messages() -> list[dict]:
     rows = cursor.fetchall()
     return [dict(zip([c[0] for c in cursor.description], row)) for row in rows]
 
-
-# === WAITLIST ===
 
 cursor.execute('''
 CREATE TABLE IF NOT EXISTS waitlist (

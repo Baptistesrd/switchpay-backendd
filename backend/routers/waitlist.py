@@ -1,5 +1,3 @@
-# backend/routers/waitlist.py
-
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, EmailStr
 
@@ -18,14 +16,12 @@ class WaitlistRequest(BaseModel):
 @router.post("/waitlist")
 def join_waitlist(payload: WaitlistRequest):
     try:
-        # 1️⃣ Save in DB
         save_waitlist(
             email=payload.email,
             company=payload.company,
             role=payload.role,
         )
 
-        # 2️⃣ Send email notification
         send_waitlist_notification(
             email=payload.email,
             company=payload.company,

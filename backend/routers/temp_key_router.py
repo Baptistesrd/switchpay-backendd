@@ -1,4 +1,3 @@
-# backend/routers/temp_key_router.py
 from fastapi import APIRouter
 from backend.security.temp_keys import generate_temp_key
 

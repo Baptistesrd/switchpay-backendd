@@ -1,5 +1,3 @@
-# backend/utils/email.py
-
 import os
 import smtplib
 from email.mime.text import MIMEText
@@ -14,7 +12,7 @@ EMAIL_TO = os.getenv("EMAIL_TO")
 
 
 def send_waitlist_notification(email: str, company: str | None = None, role: str | None = None):
-    subject = "🚀 New SwitchPay waitlist signup"
+    subject = "🚀 New switchpay waitlist signup"
 
     body = f"""
 New waitlist signup 🚀
@@ -23,7 +21,7 @@ Email: {email}
 Company: {company or "-"}
 Role: {role or "-"}
 
-— SwitchPay
+— switchpay
 """
 
     msg = MIMEMultipart()

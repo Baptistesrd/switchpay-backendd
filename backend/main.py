@@ -1,5 +1,3 @@
-# backend/main.py
-
 import os
 import logging
 from fastapi import FastAPI
@@ -11,18 +9,10 @@ from backend.routers.contact import router as contact_router
 from backend.routers.temp_key_router import router as temp_key_router
 from backend.routers.waitlist import router as waitlist_router
 
-# ============================================================
-# APP
-# ============================================================
-
 app = FastAPI(
     title="switchpay API",
     version="2.0.0",
 )
-
-# ============================================================
-# CORS — FIX FINAL
-# ============================================================
 
 app.add_middleware(
     CORSMiddleware,
@@ -37,10 +27,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ============================================================
-# LOGGING
-# ============================================================
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("switchpay")
 
@@ -48,19 +34,12 @@ logger = logging.getLogger("switchpay")
 async def startup():
     logger.info("🚀 SwitchPay API started")
 
-# ============================================================
-# ROUTERS
-# ============================================================
 
 app.include_router(transaction_router)
 app.include_router(metrics_router)
 app.include_router(temp_key_router)
 app.include_router(contact_router)
 app.include_router(waitlist_router)
-
-# ============================================================
-# HEALTH
-# ============================================================
 
 @app.get("/health")
 def health():
