@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, EmailStr
 
 from backend.db.db_utils import save_contact_message, get_all_contact_messages
-from backend.services.mailer import send_email
+from backend.services.mailer import send_contact_email
 
 router = APIRouter()
 
@@ -21,7 +21,7 @@ async def create_contact(data: ContactRequest):
             f"Message:\n{data.message}"
         )
 
-        await send_email(subject, body)
+        send_contact_email(subject, body)
 
         return {
             "status": "ok",

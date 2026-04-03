@@ -13,7 +13,7 @@ def get_metrics():
     transactions = get_all_transactions() or []
 
     total_transactions = len(transactions)
-    total_volume = sum(float(tx.get("amount", 0)) for tx in transactions)
+    total_volume = sum(float(tx.get("montant", 0)) for tx in transactions)
 
     transactions_by_psp = defaultdict(int)
     for tx in transactions:

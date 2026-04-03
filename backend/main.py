@@ -8,6 +8,7 @@ from backend.routers.metrics import router as metrics_router
 from backend.routers.contact import router as contact_router
 from backend.routers.temp_key_router import router as temp_key_router
 from backend.routers.waitlist import router as waitlist_router
+from backend.routers.webhook import router as webhook_router
 
 app = FastAPI(
     title="switchpay API",
@@ -40,6 +41,7 @@ app.include_router(metrics_router)
 app.include_router(temp_key_router)
 app.include_router(contact_router)
 app.include_router(waitlist_router)
+app.include_router(webhook_router)
 
 @app.get("/health")
 def health():

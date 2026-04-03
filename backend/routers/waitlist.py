@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, EmailStr
 
 from backend.db.db_utils import save_waitlist, get_waitlist
-from backend.utils.email import send_waitlist_notification
+from backend.services.mailer import send_waitlist_email
 
 router = APIRouter(tags=["waitlist"])
 
@@ -22,7 +22,7 @@ def join_waitlist(payload: WaitlistRequest):
             role=payload.role,
         )
 
-        send_waitlist_notification(
+        send_waitlist_email(
             email=payload.email,
             company=payload.company,
             role=payload.role,
