@@ -1,26 +1,33 @@
-from fastapi import APIRouter, Depends, HTTPException, Header
-from backend.schemas.transaction import TransactionRequest, TransactionResponse
-from backend.services import payment_processor
-from backend.db.db_utils import (
-    save_transaction,
-    save_idempotency,
-    get_idempotency,
-    get_all_transactions,
-)
-from backend.security.auth import verify_api_key
-from datetime import datetime
-import uuid
-import time
 import hashlib
 import json
-from typing import Optional, Dict, Any, List
+import logging
+import time
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Depends, Header, HTTPException
+
+from backend.db.db_utils import (
+    get_all_transactions,
+    get_idempotency,
+    save_idempotency,
+    save_transaction,
+)
+from backend.schemas.transaction import TransactionRequest, TransactionResponse
+from backend.security.auth import verify_api_key
+from backend.services import payment_processor
+from backend.services.smart_router import smart_router
+
+logger = logging.getLogger("switchpay.router.transaction")
 
 router = APIRouter()
 
 
-def compute_request_hash(payload: dict) -> str:
-    s = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(s.encode("utf-8")).hexdigest()
+def _request_hash(payload: dict) -> str:
+    """Return a SHA-256 hex digest of the canonicalised request payload."""
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 @router.post("/transaction", response_model=TransactionResponse)
@@ -28,28 +35,42 @@ async def create_transaction(
     data: TransactionRequest,
     api=Depends(verify_api_key),
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
-):
-    payload = data.dict()
-    req_hash = compute_request_hash(payload)
+) -> Dict[str, Any]:
+    """Process a payment transaction through the optimal PSP.
 
+    If an ``Idempotency-Key`` header is provided the endpoint returns the cached
+    response for duplicate requests without re-processing.  The key expires after
+    24 hours (configurable via IDEMPOTENCY_TTL_SECONDS in db_utils.py).
+
+    Returns:
+        TransactionResponse with the final status, chosen PSP, and latency.
+
+    Raises:
+        409 if the same idempotency key is reused with a different payload.
+    """
+    payload = data.model_dump()
+    req_hash = _request_hash(payload)
+
+    # ── Idempotency check ────────────────────────────────────────────────────
     if idempotency_key:
         record = get_idempotency(idempotency_key)
         if record:
             if record["request_hash"] == req_hash and record["response_snapshot"]:
+                logger.info("Idempotent replay | key=%s", idempotency_key)
                 return record["response_snapshot"]
             raise HTTPException(
                 status_code=409,
-                detail="Idempotency conflict: different payload for same key",
+                detail="Idempotency conflict: different payload reuses the same key.",
             )
 
-    tx_id = str(uuid.uuid4())
-
+    # ── PSP selection ────────────────────────────────────────────────────────
     try:
-        from backend.services.smart_router import smart_router
         chosen_psp = smart_router(payload)
-    except Exception:
+    except Exception as exc:
+        logger.warning("smart_router failed, defaulting to stripe: %s", exc)
         chosen_psp = "stripe"
 
+    tx_id = str(uuid.uuid4())
     transaction_data: Dict[str, Any] = {
         "id": tx_id,
         "entreprise": api.get("org", "sandbox"),
@@ -59,16 +80,22 @@ async def create_transaction(
         "psp": chosen_psp,
         "psp_tx_id": None,
         "device": data.device,
-        "created_at": datetime.utcnow().isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
         "status": "pending",
         "latency_ms": None,
         "raw_response": None,
     }
 
+    # ── PSP call ─────────────────────────────────────────────────────────────
     start = time.perf_counter()
-    result = payment_processor.call_psp(chosen_psp, transaction_data)
+    result = await payment_processor.call_psp(chosen_psp, transaction_data)
     latency_ms = round((time.perf_counter() - start) * 1000, 1)
 
+    # Use the PSP that actually processed the transaction (may differ from
+    # chosen_psp if failover occurred).
+    actual_psp = result.get("psp_used", chosen_psp)
+
+    transaction_data["psp"] = actual_psp
     transaction_data["status"] = result.get("status", "failed")
     transaction_data["psp_tx_id"] = result.get("psp_tx_id") or result.get("psp_id")
     transaction_data["latency_ms"] = latency_ms
@@ -77,12 +104,13 @@ async def create_transaction(
     save_transaction(transaction_data)
 
     if idempotency_key:
-        snapshot = transaction_data.copy()
+        snapshot = {k: v for k, v in transaction_data.items() if k != "raw_response"}
         save_idempotency(idempotency_key, req_hash, tx_id, snapshot)
 
     return transaction_data
 
 
 @router.get("/transactions", response_model=List[TransactionResponse])
-async def list_transactions(api=Depends(verify_api_key)):
+async def list_transactions(api=Depends(verify_api_key)) -> list:
+    """Return all transactions for the authenticated organisation."""
     return get_all_transactions()

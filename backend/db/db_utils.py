@@ -1,156 +1,306 @@
-import sqlite3
+"""
+SQLite data access layer for SwitchPay.
+
+Thread safety: a module-level threading.Lock serialises all DB writes and
+reads.  A single shared connection is used with WAL journal mode, which
+allows concurrent readers but serialised writers — sufficient for the current
+traffic level.  Upgrade to a connection pool (e.g. aiosqlite) before scaling
+to multiple workers.
+
+Idempotency TTL: records older than IDEMPOTENCY_TTL_SECONDS are treated as
+expired and ignored by get_idempotency().  A cleanup sweep runs on import.
+"""
+
 import json
-from datetime import datetime
+import logging
+import sqlite3
+import threading
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-conn = sqlite3.connect("transactions.db", check_same_thread=False)
-cursor = conn.cursor()
+logger = logging.getLogger("switchpay.db")
 
-cursor.execute("PRAGMA journal_mode=WAL;")
-cursor.execute("PRAGMA synchronous=NORMAL;")
-cursor.execute("PRAGMA foreign_keys=ON;")
+IDEMPOTENCY_TTL_SECONDS: int = 86_400  # 24 hours
 
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS transactions (
-    id TEXT PRIMARY KEY,
-    entreprise TEXT,
-    montant REAL,
-    devise TEXT,
-    pays TEXT,
-    psp TEXT,
-    psp_tx_id TEXT,
-    device TEXT,
-    created_at TEXT,
-    status TEXT,
-    latency_ms REAL,
-    raw_response TEXT
-)
-''')
+_lock = threading.Lock()
+_conn = sqlite3.connect("transactions.db", check_same_thread=False)
 
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS idempotency (
-    key TEXT PRIMARY KEY,
-    request_hash TEXT,
-    tx_id TEXT,
-    response_snapshot TEXT,
-    created_at TEXT
-)
-''')
+# ── Schema setup ─────────────────────────────────────────────────────────────
 
-cursor.execute("CREATE INDEX IF NOT EXISTS idx_tx_created_at ON transactions(created_at)")
-cursor.execute("CREATE INDEX IF NOT EXISTS idx_tx_psp ON transactions(psp)")
-cursor.execute("CREATE INDEX IF NOT EXISTS idx_tx_status ON transactions(status)")
-cursor.execute("CREATE INDEX IF NOT EXISTS idx_idemp_created_at ON idempotency(created_at)")
+with _lock:
+    _conn.execute("PRAGMA journal_mode=WAL;")
+    _conn.execute("PRAGMA synchronous=NORMAL;")
+    _conn.execute("PRAGMA foreign_keys=ON;")
 
-conn.commit()
+    _conn.execute("""
+        CREATE TABLE IF NOT EXISTS transactions (
+            id          TEXT PRIMARY KEY,
+            entreprise  TEXT,
+            montant     REAL,
+            devise      TEXT,
+            pays        TEXT,
+            psp         TEXT,
+            psp_tx_id   TEXT,
+            device      TEXT,
+            created_at  TEXT,
+            status      TEXT,
+            latency_ms  REAL,
+            raw_response TEXT
+        )
+    """)
 
-def save_transaction(tx: dict):
-    cursor.execute('''
-        INSERT OR REPLACE INTO transactions (
-            id, entreprise, montant, devise, pays, psp, psp_tx_id, device, created_at, status, latency_ms, raw_response
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        tx["id"],
-        tx.get("entreprise"),
-        tx.get("montant"),
-        tx.get("devise"),
-        tx.get("pays"),
-        tx.get("psp"),
-        tx.get("psp_tx_id"),
-        tx.get("device"),
-        tx.get("created_at"),
-        tx.get("status"),
-        tx.get("latency_ms"),
-        json.dumps(tx.get("raw_response")) if tx.get("raw_response") is not None else None,
-    ))
-    conn.commit()
+    _conn.execute("""
+        CREATE TABLE IF NOT EXISTS idempotency (
+            key               TEXT PRIMARY KEY,
+            request_hash      TEXT,
+            tx_id             TEXT,
+            response_snapshot TEXT,
+            created_at        TEXT
+        )
+    """)
+
+    _conn.execute("""
+        CREATE TABLE IF NOT EXISTS contact_messages (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            email      TEXT NOT NULL,
+            message    TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+
+    _conn.execute("""
+        CREATE TABLE IF NOT EXISTS waitlist (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            email      TEXT NOT NULL UNIQUE,
+            company    TEXT,
+            role       TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+
+    _conn.execute("CREATE INDEX IF NOT EXISTS idx_tx_created_at  ON transactions(created_at)")
+    _conn.execute("CREATE INDEX IF NOT EXISTS idx_tx_psp         ON transactions(psp)")
+    _conn.execute("CREATE INDEX IF NOT EXISTS idx_tx_status      ON transactions(status)")
+    _conn.execute("CREATE INDEX IF NOT EXISTS idx_tx_entreprise  ON transactions(entreprise)")
+    _conn.execute("CREATE INDEX IF NOT EXISTS idx_idemp_created  ON idempotency(created_at)")
+    _conn.commit()
+
+
+# ── Internal helpers ─────────────────────────────────────────────────────────
+
+def _row_to_dict(cursor: sqlite3.Cursor, row: tuple) -> dict:
+    return dict(zip([c[0] for c in cursor.description], row))
+
+
+# ── Transactions ─────────────────────────────────────────────────────────────
+
+def save_transaction(tx: dict) -> None:
+    """Persist or overwrite a transaction record."""
+    with _lock:
+        _conn.execute(
+            """
+            INSERT OR REPLACE INTO transactions
+                (id, entreprise, montant, devise, pays, psp, psp_tx_id,
+                 device, created_at, status, latency_ms, raw_response)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                tx["id"],
+                tx.get("entreprise"),
+                tx.get("montant"),
+                tx.get("devise"),
+                tx.get("pays"),
+                tx.get("psp"),
+                tx.get("psp_tx_id"),
+                tx.get("device"),
+                tx.get("created_at"),
+                tx.get("status"),
+                tx.get("latency_ms"),
+                json.dumps(tx["raw_response"]) if tx.get("raw_response") is not None else None,
+            ),
+        )
+        _conn.commit()
+
 
 def get_transaction_by_id(tx_id: str) -> Optional[dict]:
-    cursor.execute("SELECT * FROM transactions WHERE id = ?", (tx_id,))
-    row = cursor.fetchone()
-    if row:
-        return dict(zip([c[0] for c in cursor.description], row))
-    return None
+    """Return a single transaction by primary key, or None."""
+    with _lock:
+        cur = _conn.execute("SELECT * FROM transactions WHERE id = ?", (tx_id,))
+        row = cur.fetchone()
+        return _row_to_dict(cur, row) if row else None
 
-def get_all_transactions() -> list[dict]:
-    cursor.execute("SELECT * FROM transactions ORDER BY datetime(created_at) DESC")
-    rows = cursor.fetchall()
-    return [dict(zip([c[0] for c in cursor.description], row)) for row in rows]
 
-def save_idempotency(key: str, request_hash: str, tx_id: str, response_snapshot: dict):
-    cursor.execute('''
-        INSERT OR REPLACE INTO idempotency (key, request_hash, tx_id, response_snapshot, created_at)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (key, request_hash, tx_id, json.dumps(response_snapshot), datetime.utcnow().isoformat()))
-    conn.commit()
+def get_all_transactions() -> list:
+    """Return all transactions ordered newest-first."""
+    with _lock:
+        cur = _conn.execute(
+            "SELECT * FROM transactions ORDER BY datetime(created_at) DESC"
+        )
+        rows = cur.fetchall()
+        return [_row_to_dict(cur, r) for r in rows]
+
+
+def get_recent_transactions(limit: int) -> list:
+    """Return the most recent ``limit`` transactions (newest-first).
+
+    Performs the LIMIT in SQL to avoid loading the entire table into memory —
+    important for the scoring engine which only needs HISTORY_WINDOW rows.
+
+    Args:
+        limit: Maximum number of rows to return.
+
+    Returns:
+        List of transaction dicts, most recent first.
+    """
+    with _lock:
+        cur = _conn.execute(
+            "SELECT * FROM transactions ORDER BY datetime(created_at) DESC LIMIT ?",
+            (limit,),
+        )
+        rows = cur.fetchall()
+        return [_row_to_dict(cur, r) for r in rows]
+
+
+# ── Idempotency ───────────────────────────────────────────────────────────────
+
+def save_idempotency(
+    key: str, request_hash: str, tx_id: str, response_snapshot: dict
+) -> None:
+    """Persist an idempotency record."""
+    with _lock:
+        _conn.execute(
+            """
+            INSERT OR REPLACE INTO idempotency
+                (key, request_hash, tx_id, response_snapshot, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                key,
+                request_hash,
+                tx_id,
+                json.dumps(response_snapshot),
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        _conn.commit()
+
 
 def get_idempotency(key: str) -> Optional[dict]:
-    cursor.execute("SELECT key, request_hash, tx_id, response_snapshot, created_at FROM idempotency WHERE key = ?", (key,))
-    row = cursor.fetchone()
-    if row:
-        k, req_hash, tx_id, snap, created_at = row
-        return {
-            "key": k,
-            "request_hash": req_hash,
-            "tx_id": tx_id,
-            "response_snapshot": json.loads(snap) if snap else None,
-            "created_at": created_at
-        }
-    return None
+    """Retrieve an idempotency record if it exists and has not expired.
 
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS contact_messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    email TEXT NOT NULL,
-    message TEXT NOT NULL,
-    created_at TEXT NOT NULL
-)
-''')
+    Records older than IDEMPOTENCY_TTL_SECONDS are treated as non-existent,
+    preventing stale keys from blocking legitimate retries after 24 hours.
 
-conn.commit()
+    Args:
+        key: The idempotency key header value.
 
+    Returns:
+        Dict with keys: key, request_hash, tx_id, response_snapshot, created_at.
+        None if not found or expired.
+    """
+    with _lock:
+        cur = _conn.execute(
+            "SELECT key, request_hash, tx_id, response_snapshot, created_at "
+            "FROM idempotency WHERE key = ?",
+            (key,),
+        )
+        row = cur.fetchone()
 
-def save_contact_message(email: str, message: str):
-    cursor.execute(
-        "INSERT INTO contact_messages (email, message, created_at) VALUES (?, ?, ?)",
-        (email, message, datetime.utcnow().isoformat())
-    )
-    conn.commit()
+    if not row:
+        return None
 
+    k, req_hash, tx_id, snap, created_at_str = row
 
-def get_all_contact_messages() -> list[dict]:
-    cursor.execute("SELECT * FROM contact_messages ORDER BY datetime(created_at) DESC")
-    rows = cursor.fetchall()
-    return [dict(zip([c[0] for c in cursor.description], row)) for row in rows]
+    # TTL enforcement
+    try:
+        created_at = datetime.fromisoformat(created_at_str)
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - created_at).total_seconds()
+        if age > IDEMPOTENCY_TTL_SECONDS:
+            logger.debug("Idempotency key expired: %s (age=%.0fs)", key, age)
+            return None
+    except (ValueError, TypeError):
+        pass  # unparseable timestamp — treat record as valid
 
-
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS waitlist (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    email TEXT NOT NULL UNIQUE,
-    company TEXT,
-    role TEXT,
-    created_at TEXT NOT NULL
-)
-''')
-
-conn.commit()
+    return {
+        "key": k,
+        "request_hash": req_hash,
+        "tx_id": tx_id,
+        "response_snapshot": json.loads(snap) if snap else None,
+        "created_at": created_at_str,
+    }
 
 
-def save_waitlist(email: str, company: str | None, role: str | None):
-    cursor.execute(
-        '''
-        INSERT OR IGNORE INTO waitlist (email, company, role, created_at)
-        VALUES (?, ?, ?, ?)
-        ''',
-        (email, company, role, datetime.utcnow().isoformat())
-    )
-    conn.commit()
+def cleanup_expired_idempotency() -> int:
+    """Delete idempotency records older than IDEMPOTENCY_TTL_SECONDS.
+
+    Should be called periodically (e.g. on application startup or via a
+    background task) to prevent unbounded table growth.
+
+    Returns:
+        Number of rows deleted.
+    """
+    cutoff = (
+        datetime.now(timezone.utc) - timedelta(seconds=IDEMPOTENCY_TTL_SECONDS)
+    ).isoformat()
+    with _lock:
+        cur = _conn.execute(
+            "DELETE FROM idempotency WHERE created_at < ?", (cutoff,)
+        )
+        _conn.commit()
+        deleted = cur.rowcount
+    if deleted:
+        logger.info("Cleaned up %d expired idempotency records", deleted)
+    return deleted
 
 
-def get_waitlist() -> list[dict]:
-    cursor.execute(
-        "SELECT * FROM waitlist ORDER BY datetime(created_at) DESC"
-    )
-    rows = cursor.fetchall()
-    return [dict(zip([c[0] for c in cursor.description], row)) for row in rows]
+# ── Contact messages ──────────────────────────────────────────────────────────
+
+def save_contact_message(email: str, message: str) -> None:
+    """Persist a contact-form submission."""
+    with _lock:
+        _conn.execute(
+            "INSERT INTO contact_messages (email, message, created_at) VALUES (?, ?, ?)",
+            (email, message, datetime.now(timezone.utc).isoformat()),
+        )
+        _conn.commit()
+
+
+def get_all_contact_messages() -> list:
+    """Return all contact messages ordered newest-first."""
+    with _lock:
+        cur = _conn.execute(
+            "SELECT * FROM contact_messages ORDER BY datetime(created_at) DESC"
+        )
+        rows = cur.fetchall()
+        return [_row_to_dict(cur, r) for r in rows]
+
+
+# ── Waitlist ──────────────────────────────────────────────────────────────────
+
+def save_waitlist(email: str, company: Optional[str], role: Optional[str]) -> None:
+    """Add an email to the waitlist (silently ignores duplicates)."""
+    with _lock:
+        _conn.execute(
+            """
+            INSERT OR IGNORE INTO waitlist (email, company, role, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (email, company, role, datetime.now(timezone.utc).isoformat()),
+        )
+        _conn.commit()
+
+
+def get_waitlist() -> list:
+    """Return all waitlist entries ordered newest-first."""
+    with _lock:
+        cur = _conn.execute(
+            "SELECT * FROM waitlist ORDER BY datetime(created_at) DESC"
+        )
+        rows = cur.fetchall()
+        return [_row_to_dict(cur, r) for r in rows]
+
+
+# ── Startup cleanup ───────────────────────────────────────────────────────────
+cleanup_expired_idempotency()
