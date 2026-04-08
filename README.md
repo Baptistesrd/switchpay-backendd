@@ -1,6 +1,6 @@
 # switchpay
 
-Smart payment routing infrastructure — built to maximize authorization rates across PSPs.
+Smart payment routing infrastructure, built to maximize authorization rates across PSPs.
 
 ## What it does
 
