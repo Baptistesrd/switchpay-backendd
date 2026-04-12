@@ -6,7 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.routers.contact import router as contact_router
 from backend.routers.metrics import router as metrics_router
-from backend.routers.temp_key_router import router as temp_key_router
+from backend.routers.temp_key_router import limiter, router as temp_key_router
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from backend.routers.transaction import router as transaction_router
 from backend.routers.waitlist import router as waitlist_router
 from backend.routers.webhook import router as webhook_router
@@ -31,6 +33,9 @@ app = FastAPI(
     description="Dynamic payment routing — selects the optimal PSP per transaction.",
     lifespan=lifespan,
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,

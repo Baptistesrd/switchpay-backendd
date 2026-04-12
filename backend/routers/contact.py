@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr
 
 from backend.db.db_utils import save_contact_message, get_all_contact_messages
+from backend.security.auth import verify_api_key
 from backend.services.mailer import send_contact_email
 
 router = APIRouter()
@@ -36,5 +37,5 @@ async def create_contact(data: ContactRequest):
 
 
 @router.get("/contact")
-def list_contacts():
+def list_contacts(api=Depends(verify_api_key)):
     return get_all_contact_messages()

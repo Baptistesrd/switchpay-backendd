@@ -1,7 +1,11 @@
+import json
 import logging
-from fastapi import APIRouter
-from pydantic import BaseModel
+import os
 from typing import Optional
+
+import stripe
+from fastapi import APIRouter, Header, HTTPException, Request
+from pydantic import BaseModel
 
 router = APIRouter(tags=["webhooks"])
 
@@ -15,7 +19,23 @@ class WebhookStripePayload(BaseModel):
 
 
 @router.post("/webhook/stripe")
-def stripe_webhook(payload: WebhookStripePayload):
+async def stripe_webhook(
+    request: Request,
+    stripe_signature: str = Header(None, alias="Stripe-Signature"),
+):
+    secret = os.getenv("STRIPE_WEBHOOK_SECRET")
+    if not secret:
+        raise HTTPException(status_code=400, detail="Webhook secret not configured")
+
+    raw_body = await request.body()
+    try:
+        stripe.WebhookSignature.verify_header(
+            raw_body.decode("utf-8"), stripe_signature or "", secret
+        )
+    except stripe.error.SignatureVerificationError:
+        raise HTTPException(status_code=400, detail="Invalid Stripe signature")
+
+    payload = WebhookStripePayload(**json.loads(raw_body))
     logger.info(
         "Webhook received | event=%s tx_id=%s status=%s",
         payload.event_type,

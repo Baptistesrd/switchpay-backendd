@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr
 
 from backend.db.db_utils import save_waitlist, get_waitlist
+from backend.security.auth import verify_api_key
 from backend.services.mailer import send_waitlist_email
 
 router = APIRouter(tags=["waitlist"])
@@ -38,5 +39,5 @@ def join_waitlist(payload: WaitlistRequest):
 
 
 @router.get("/waitlist")
-def list_waitlist():
+def list_waitlist(api=Depends(verify_api_key)):
     return get_waitlist()
