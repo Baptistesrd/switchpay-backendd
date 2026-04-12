@@ -1,10 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr
 
 from backend.db.db_utils import save_waitlist, get_waitlist
+from backend.routers.temp_key_router import limiter
 from backend.security.auth import verify_api_key
 from backend.services.mailer import send_waitlist_email
 
+logger = logging.getLogger("switchpay.waitlist")
 router = APIRouter(tags=["waitlist"])
 
 
@@ -15,7 +19,8 @@ class WaitlistRequest(BaseModel):
 
 
 @router.post("/waitlist")
-def join_waitlist(payload: WaitlistRequest):
+@limiter.limit("5/minute")
+def join_waitlist(request: Request, payload: WaitlistRequest):
     try:
         save_waitlist(
             email=payload.email,
@@ -35,7 +40,11 @@ def join_waitlist(payload: WaitlistRequest):
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Waitlist signup error: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="An internal error occurred. Please try again later.",
+        )
 
 
 @router.get("/waitlist")

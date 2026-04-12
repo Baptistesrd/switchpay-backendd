@@ -13,17 +13,24 @@ expired and ignored by get_idempotency().  A cleanup sweep runs on import.
 
 import json
 import logging
+import os
 import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger("switchpay.db")
 
 IDEMPOTENCY_TTL_SECONDS: int = 86_400  # 24 hours
 
+_DB_PATH: str = os.environ.get(
+    "DB_PATH",
+    str(Path(__file__).resolve().parent.parent.parent / "transactions.db"),
+)
+
 _lock = threading.Lock()
-_conn = sqlite3.connect("transactions.db", check_same_thread=False)
+_conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
 
 # ── Schema setup ─────────────────────────────────────────────────────────────
 
@@ -305,7 +312,12 @@ def get_idempotency(key: str) -> Optional[dict]:
             logger.debug("Idempotency key expired: %s (age=%.0fs)", key, age)
             return None
     except (ValueError, TypeError):
-        pass  # unparseable timestamp — treat record as valid
+        logger.warning(
+            "Idempotency key %r has unparseable created_at=%r — treating as invalid",
+            key,
+            created_at_str,
+        )
+        return None
 
     return {
         "key": k,
@@ -386,5 +398,17 @@ def get_waitlist() -> list:
         return [_row_to_dict(cur, r) for r in rows]
 
 
-# ── Startup cleanup ───────────────────────────────────────────────────────────
-cleanup_expired_idempotency()
+# cleanup_expired_idempotency() is scheduled as a periodic asyncio task in
+# main.py lifespan (every 60 min) — not called here at import time.
+
+
+# ── Connectivity probe ────────────────────────────────────────────────────────
+
+def ping_db() -> bool:
+    """Return True if the DB connection can execute a trivial query."""
+    try:
+        with _lock:
+            _conn.execute("SELECT 1")
+        return True
+    except Exception:
+        return False

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 
@@ -14,16 +15,26 @@ from backend.routers.waitlist import router as waitlist_router
 from backend.routers.webhook import router as webhook_router
 from contextlib import asynccontextmanager
 
+from backend.db.db_utils import cleanup_expired_idempotency, ping_db
 from backend.services.payment_processor import PSP_CLIENTS
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("switchpay")
 
 
+async def _idempotency_cleanup_loop() -> None:
+    """Run cleanup_expired_idempotency every 60 minutes."""
+    while True:
+        cleanup_expired_idempotency()
+        await asyncio.sleep(3600)
+
+
 @asynccontextmanager
 async def lifespan(application: "FastAPI"):  # type: ignore[name-defined]
     logger.info("SwitchPay API starting up")
+    task = asyncio.create_task(_idempotency_cleanup_loop())
     yield
+    task.cancel()
     logger.info("SwitchPay API shut down")
 
 
@@ -37,12 +48,18 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+_cors_origins = [
+    o.strip()
+    for o in os.environ.get(
+        "CORS_ORIGINS",
+        "https://switchpayglobal.com,https://switchpay-frontendd.onrender.com",
+    ).split(",")
+    if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://switchpayglobal.com",
-        "https://switchpay-frontendd.onrender.com",
-    ],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -63,15 +80,7 @@ def health() -> dict:
     Returns the API status, registered PSP clients, and active routing strategy
     so the frontend dashboard can reflect the current configuration.
     """
-    from backend.db.db_utils import _conn  # light connectivity check
-
-    db_ok = False
-    try:
-        _conn.execute("SELECT 1")
-        db_ok = True
-    except Exception:
-        pass
-
+    db_ok = ping_db()
     return {
         "status": "ok" if db_ok else "degraded",
         "db": "ok" if db_ok else "error",

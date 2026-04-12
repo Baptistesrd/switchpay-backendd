@@ -1,10 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr
 
 from backend.db.db_utils import save_contact_message, get_all_contact_messages
+from backend.routers.temp_key_router import limiter
 from backend.security.auth import verify_api_key
 from backend.services.mailer import send_contact_email
 
+logger = logging.getLogger("switchpay.contact")
 router = APIRouter()
 
 class ContactRequest(BaseModel):
@@ -12,7 +16,8 @@ class ContactRequest(BaseModel):
     message: str
 
 @router.post("/contact")
-async def create_contact(data: ContactRequest):
+@limiter.limit("5/minute")
+async def create_contact(request: Request, data: ContactRequest):
     try:
         save_contact_message(data.email, data.message)
 
@@ -30,9 +35,10 @@ async def create_contact(data: ContactRequest):
         }
 
     except Exception as e:
+        logger.error("Contact form error: %s", e, exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Contact failed: {str(e)}"
+            detail="An internal error occurred. Please try again later.",
         )
 
 
