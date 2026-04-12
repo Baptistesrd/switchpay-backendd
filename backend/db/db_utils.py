@@ -140,6 +140,67 @@ def get_all_transactions() -> list:
         return [_row_to_dict(cur, r) for r in rows]
 
 
+def get_psp_metrics() -> dict:
+    """Return per-PSP aggregated metrics and overall totals via SQL.
+
+    Runs two queries under a single lock so the summary totals are consistent
+    with the per-PSP rows.  No application-side iteration over individual rows.
+
+    Returns:
+        Dict with:
+          "summary": {"total_transactions": int, "total_volume": float}
+          "by_psp":  {psp: {transaction_count, success_count,
+                             authorization_rate, avg_latency_ms, total_volume}}
+    """
+    with _lock:
+        cur = _conn.execute("""
+            SELECT
+                COALESCE(psp, 'unknown')                                AS psp,
+                COUNT(*)                                                AS transaction_count,
+                SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END)    AS success_count,
+                AVG(latency_ms)                                         AS avg_latency_ms,
+                SUM(COALESCE(montant, 0.0))                             AS total_volume
+            FROM transactions
+            GROUP BY psp
+        """)
+        psp_rows = cur.fetchall()
+
+        cur2 = _conn.execute(
+            "SELECT COUNT(*), SUM(COALESCE(montant, 0.0)) FROM transactions"
+        )
+        total_count, total_volume = cur2.fetchone()
+
+    by_psp = {}
+    for psp, tx_count, success_count, avg_latency, vol in psp_rows:
+        auth_rate = success_count / tx_count if tx_count else 0.0
+        by_psp[psp] = {
+            "transaction_count": tx_count,
+            "success_count": success_count,
+            "authorization_rate": round(auth_rate, 4),
+            "avg_latency_ms": round(avg_latency, 1) if avg_latency is not None else None,
+            "total_volume": round(vol or 0.0, 2),
+        }
+
+    return {
+        "summary": {
+            "total_transactions": total_count or 0,
+            "total_volume": round(total_volume or 0.0, 2),
+        },
+        "by_psp": by_psp,
+    }
+
+
+def get_transactions_by_org(org: str) -> list:
+    """Return all transactions for a specific organisation, newest-first."""
+    with _lock:
+        cur = _conn.execute(
+            "SELECT * FROM transactions WHERE entreprise = ? ORDER BY datetime(created_at) DESC",
+            (org,),
+        )
+        rows = cur.fetchall()
+        return [_row_to_dict(cur, r) for r in rows]
+
+
 def get_recent_transactions(limit: int) -> list:
     """Return the most recent ``limit`` transactions (newest-first).
 
@@ -165,12 +226,18 @@ def get_recent_transactions(limit: int) -> list:
 
 def save_idempotency(
     key: str, request_hash: str, tx_id: str, response_snapshot: dict
-) -> None:
-    """Persist an idempotency record."""
+) -> Optional[dict]:
+    """Persist an idempotency record atomically and return the canonical row.
+
+    Uses INSERT OR IGNORE so that if two concurrent requests race with the same
+    key, exactly one write wins and the loser's insert is silently discarded.
+    Both callers then read the same canonical record in the same lock, so the
+    caller that lost the race can detect it and return the winning response.
+    """
     with _lock:
         _conn.execute(
             """
-            INSERT OR REPLACE INTO idempotency
+            INSERT OR IGNORE INTO idempotency
                 (key, request_hash, tx_id, response_snapshot, created_at)
             VALUES (?, ?, ?, ?, ?)
             """,
@@ -183,6 +250,23 @@ def save_idempotency(
             ),
         )
         _conn.commit()
+        cur = _conn.execute(
+            "SELECT key, request_hash, tx_id, response_snapshot, created_at "
+            "FROM idempotency WHERE key = ?",
+            (key,),
+        )
+        row = cur.fetchone()
+
+    if not row:
+        return None
+    k, req_hash, stored_tx_id, snap, created_at_str = row
+    return {
+        "key": k,
+        "request_hash": req_hash,
+        "tx_id": stored_tx_id,
+        "response_snapshot": json.loads(snap) if snap else None,
+        "created_at": created_at_str,
+    }
 
 
 def get_idempotency(key: str) -> Optional[dict]:

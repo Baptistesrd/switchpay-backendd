@@ -3,11 +3,10 @@ Metrics router — aggregated performance data for dashboard and monitoring.
 """
 
 import logging
-from collections import defaultdict
 
 from fastapi import APIRouter
 
-from backend.db.db_utils import get_all_transactions, get_recent_transactions
+from backend.db.db_utils import get_psp_metrics, get_recent_transactions
 from backend.services.scoring_engine import HISTORY_WINDOW, compute_psp_scores
 from backend.services.thompson_sampling import compute_beta_params
 
@@ -33,49 +32,8 @@ def get_metrics() -> dict:
     Returns:
         JSON object with "summary" and "by_psp" keys.
     """
-    transactions = get_all_transactions() or []
-
-    total_count = len(transactions)
-    total_volume = sum(float(tx.get("montant") or 0) for tx in transactions)
-
-    # Per-PSP aggregation
-    psp_stats: dict = defaultdict(
-        lambda: {
-            "transaction_count": 0,
-            "success_count": 0,
-            "latency_sum": 0.0,
-            "latency_count": 0,
-            "volume": 0.0,
-        }
-    )
-
-    for tx in transactions:
-        psp = tx.get("psp") or "unknown"
-        s = psp_stats[psp]
-        s["transaction_count"] += 1
-        if tx.get("status") == "success":
-            s["success_count"] += 1
-        lat = tx.get("latency_ms")
-        if lat is not None:
-            try:
-                s["latency_sum"] += float(lat)
-                s["latency_count"] += 1
-            except (TypeError, ValueError):
-                pass
-        s["volume"] += float(tx.get("montant") or 0)
-
-    by_psp = {}
-    for psp, s in psp_stats.items():
-        n = s["transaction_count"]
-        auth_rate = s["success_count"] / n if n else 0.0
-        avg_lat = s["latency_sum"] / s["latency_count"] if s["latency_count"] else None
-        by_psp[psp] = {
-            "transaction_count": n,
-            "success_count": s["success_count"],
-            "authorization_rate": round(auth_rate, 4),
-            "avg_latency_ms": round(avg_lat, 1) if avg_lat is not None else None,
-            "total_volume": round(s["volume"], 2),
-        }
+    base = get_psp_metrics()
+    by_psp = base["by_psp"]
 
     # Fetch recent window once and share between both engine views.
     recent = []
@@ -106,10 +64,7 @@ def get_metrics() -> dict:
         logger.warning("Could not compute Thompson parameters for metrics: %s", exc)
 
     return {
-        "summary": {
-            "total_transactions": total_count,
-            "total_volume": round(total_volume, 2),
-        },
+        "summary": base["summary"],
         "by_psp": by_psp,
         "thompson": thompson,
     }

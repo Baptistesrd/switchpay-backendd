@@ -9,8 +9,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException
 
 from backend.db.db_utils import (
-    get_all_transactions,
     get_idempotency,
+    get_transactions_by_org,
     save_idempotency,
     save_transaction,
 )
@@ -113,4 +113,7 @@ async def create_transaction(
 @router.get("/transactions", response_model=List[TransactionResponse])
 async def list_transactions(api=Depends(verify_api_key)) -> list:
     """Return all transactions for the authenticated organisation."""
-    return get_all_transactions()
+    org = api.get("org")
+    if not org:
+        raise HTTPException(status_code=403, detail="Cannot determine organisation from API key")
+    return get_transactions_by_org(org)
