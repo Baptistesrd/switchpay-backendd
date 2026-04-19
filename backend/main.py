@@ -1,20 +1,23 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 import asyncio
 import logging
 import os
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 from backend.routers.contact import router as contact_router
 from backend.routers.metrics import router as metrics_router
 from backend.routers.temp_key_router import limiter, router as temp_key_router
-from slowapi import _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
 from backend.routers.transaction import router as transaction_router
 from backend.routers.waitlist import router as waitlist_router
 from backend.routers.webhook import router as webhook_router
-from contextlib import asynccontextmanager
-
 from backend.db.db_utils import cleanup_expired_idempotency, ping_db
 from backend.services.payment_processor import PSP_CLIENTS
 
@@ -75,11 +78,7 @@ app.include_router(webhook_router)
 
 @app.get("/health", tags=["ops"])
 def health() -> dict:
-    """Liveness / readiness probe.
-
-    Returns the API status, registered PSP clients, and active routing strategy
-    so the frontend dashboard can reflect the current configuration.
-    """
+    """Liveness / readiness probe."""
     db_ok = ping_db()
     return {
         "status": "ok" if db_ok else "degraded",
