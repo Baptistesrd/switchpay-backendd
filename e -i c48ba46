@@ -1,0 +1,37 @@
+[33m87d04e4[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m feat: auth system — JWT + OAuth + users table
+[33mffca5bd[m wording
+[33mc48ba46[m[33m ([m[1;31morigin/main[m[33m)[m fix: upgrade psycopg2-binary for Python 3.13
+[33m875af35[m feat: real Stripe integration + PostgreSQL support
+[33ma15badb[m fix(debt): rate-limit, logging, db-path, idempotency cleanup, CORS from env
+[33mb15d64b[m perf(db): aggregate metrics in SQL, scope transactions by org, atomic idempotency
+[33mec11edb[m added stripe
+[33m4ce92bb[m fix(security): patch 4 critical auth & webhook vulnerabilities
+[33m5670db7[m Fix formatting and duplicate entries in README.md
+[33m37ba16d[m Refine description of switchpay in README
+[33m69f38a9[m ok
+[33m5a4fcf2[m stop tracking .env and database
+[33mc4a57cc[m feat: Thompson Sampling, scoring engine refactor, 70 tests, dashboard wiring
+[33m6ea5ac2[m changes
+[33m37e9faa[m infrastructure changes to optimize DB
+[33m7cb1e80[m fix: backend phase 2 cleanup
+[33mf1be785[m remove .env from tracking
+[33m0f3c08d[m fix: remove .env from history
+[33m1344dce[m update
+[33m154eb17[m update
+[33ma080bf8[m update
+[33m4d54053[m update
+[33m0b027db[m update
+[33mcf4cbcb[m update
+[33m0b65a75[m update
+[33md17141b[m update
+[33mc041bce[m Add backend overview to README.md
+[33m0f6e026[m update
+[33m160a0bd[m update
+[33mb0bad6d[m update
+[33md5499b4[m update
+[33m01e2a9f[m commit - SwitchPay backend
+[33m4eac476[m fix: add stripe dependency
+[33m0998ee9[m fix: rename stripe.py to psp_stripe.py to match imports
+[33m5503903[m fix: clean db_utils and remove idempotency
+[33m38b6012[m move requirements.txt to root for Render
+[33m540e057[m clean init backend project (no secrets)
