@@ -169,6 +169,21 @@ def _create_schema() -> None:
         cur.execute("CREATE INDEX IF NOT EXISTS idx_tx_psp        ON transactions(psp)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_tx_status     ON transactions(status)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_tx_entreprise ON transactions(entreprise)")
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id            TEXT PRIMARY KEY,
+                email         TEXT NOT NULL UNIQUE,
+                org_name      TEXT NOT NULL,
+                password_hash TEXT,
+                api_key       TEXT NOT NULL UNIQUE,
+                provider      TEXT DEFAULT 'email',
+                created_at    TEXT NOT NULL
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_users_email   ON users(email)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_users_api_key ON users(api_key)")
+
         cur.execute("CREATE INDEX IF NOT EXISTS idx_idemp_created ON idempotency(created_at)")
 
 
@@ -486,3 +501,42 @@ def ping_db() -> bool:
         return True
     except Exception:
         return False
+
+
+# ── Users ─────────────────────────────────────────────────────────────────
+
+import uuid as _uuid
+
+
+def create_user(
+    email: str,
+    org_name: str,
+    password_hash: Optional[str],
+    api_key: str,
+    provider: str = "email",
+) -> dict:
+    user_id = str(_uuid.uuid4())
+    created = datetime.now(timezone.utc).isoformat()
+    with _get_conn() as conn:
+        conn.cursor().execute(
+            f"INSERT INTO users (id, email, org_name, password_hash, api_key, provider, created_at) "
+            f"VALUES ({_PH},{_PH},{_PH},{_PH},{_PH},{_PH},{_PH})",
+            (user_id, email, org_name, password_hash, api_key, provider, created),
+        )
+    return {"id": user_id, "email": email, "org_name": org_name, "api_key": api_key}
+
+
+def get_user_by_email(email: str) -> Optional[dict]:
+    with _get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(f"SELECT * FROM users WHERE email = {_PH}", (email,))
+        row = cur.fetchone()
+        return _row_to_dict(cur, row) if row else None
+
+
+def get_user_by_api_key(api_key: str) -> Optional[dict]:
+    with _get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(f"SELECT * FROM users WHERE api_key = {_PH}", (api_key,))
+        row = cur.fetchone()
+        return _row_to_dict(cur, row) if row else None
