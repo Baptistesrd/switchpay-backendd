@@ -18,6 +18,7 @@ from backend.routers.temp_key_router import limiter, router as temp_key_router
 from backend.routers.transaction import router as transaction_router
 from backend.routers.waitlist import router as waitlist_router
 from backend.routers.webhook import router as webhook_router
+from backend.routers.auth import router as auth_router
 from backend.db.db_utils import cleanup_expired_idempotency, ping_db
 from backend.services.payment_processor import PSP_CLIENTS
 
@@ -74,6 +75,7 @@ app.include_router(temp_key_router)
 app.include_router(contact_router)
 app.include_router(waitlist_router)
 app.include_router(webhook_router)
+app.include_router(auth_router)
 
 
 @app.get("/health", tags=["ops"])
