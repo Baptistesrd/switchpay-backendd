@@ -3,13 +3,13 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import Header, HTTPException, Depends
+from fastapi import Header, HTTPException
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "change-me-in-production")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 jours
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -50,7 +50,6 @@ def get_current_user(authorization: str = Header(None)):
     return payload
 
 
-# Rétrocompatibilité — les routes existantes utilisent encore x-api-key
 def verify_api_key(x_api_key: str = Header(None)):
     if not x_api_key:
         raise HTTPException(status_code=403, detail="API key missing")
